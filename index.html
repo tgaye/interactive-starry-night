@@ -1,0 +1,393 @@
+<!DOCTYPE html><html><head><meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Starry Night</title>
+    <script src="https://cdn.jsdelivr.net/npm/p5@1.8.0/lib/p5.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+        #canvas-container {
+            width: 100%;
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: center;
+            position: relative;
+        }
+    </style>
+
+<base target="_self">
+
+
+    </head><body><div id="canvas-container"></div>
+
+    <script>
+        const sketch = function(p) {
+            // Star system variables
+            let stars = [];
+            let shootingStars = [];
+            let ripples = [];
+            let constellations = [];
+            let starCount = 800;
+            let maxShootingStars = 3;
+            let lastShootingStar = 0;
+            let shootingStarInterval = 3000;
+            let bgGradient;
+            let colorPalettes = [
+                ['#1a1a2e', '#16213e', '#0f3460', '#533483', '#e94560'],
+                ['#0f2027', '#203a43', '#2c5364', '#3a7bd5', '#00d2ff'],
+                ['#23074d', '#cc5333', '#ff8c00', '#e73827', '#f5af19']
+            ];
+            let currentPalette;
+            let audioContext, gainNode, oscillator;
+            let isAudioEnabled = false;
+
+            p.setup = function() {
+                let canvas = p.createCanvas(p.windowWidth, p.windowHeight);
+                canvas.parent('canvas-container');
+                currentPalette = colorPalettes[0];
+                
+                // Create background gradient
+                createBackgroundGradient();
+                
+                // Initialize stars
+                for (let i = 0; i < starCount; i++) {
+                    stars.push(new Star());
+                }
+                
+                // Try to initialize audio
+                try {
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    gainNode = audioContext.createGain();
+                    gainNode.gain.value = 0;
+                    gainNode.connect(audioContext.destination);
+                    isAudioEnabled = true;
+                } catch (e) {
+                    console.log("Audio not supported");
+                    isAudioEnabled = false;
+                }
+            };
+
+            function createBackgroundGradient() {
+                bgGradient = p.createGraphics(p.width, p.height);
+                let c1 = p.color(currentPalette[0]);
+                let c2 = p.color(currentPalette[1]);
+                
+                for (let y = 0; y < p.height; y++) {
+                    let inter = p.map(y, 0, p.height, 0, 1);
+                    let c = p.lerpColor(c1, c2, inter);
+                    bgGradient.stroke(c);
+                    bgGradient.line(0, y, p.width, y);
+                }
+            }
+
+            p.draw = function() {
+                // Draw background
+                p.image(bgGradient, 0, 0);
+                
+                // Update and display stars
+                for (let star of stars) {
+                    star.update();
+                    star.display();
+                }
+                
+                // Check for new shooting stars
+                if (p.millis() - lastShootingStar > shootingStarInterval && 
+                    shootingStars.length < maxShootingStars) {
+                    shootingStars.push(new ShootingStar());
+                    lastShootingStar = p.millis();
+                    shootingStarInterval = p.random(2000, 5000);
+                }
+                
+                // Update and display shooting stars
+                for (let i = shootingStars.length - 1; i >= 0; i--) {
+                    shootingStars[i].update();
+                    shootingStars[i].display();
+                    if (shootingStars[i].isDone()) {
+                        shootingStars.splice(i, 1);
+                    }
+                }
+                
+                // Update and display ripples
+                for (let i = ripples.length - 1; i >= 0; i--) {
+                    ripples[i].update();
+                    ripples[i].display();
+                    if (ripples[i].isDone()) {
+                        ripples.splice(i, 1);
+                    }
+                }
+                
+                // Update and display constellations
+                for (let i = constellations.length - 1; i >= 0; i--) {
+                    constellations[i].update();
+                    constellations[i].display();
+                    if (constellations[i].isDone()) {
+                        constellations.splice(i, 1);
+                    }
+                }
+                
+                // Create subtle constellation when mouse is still
+                if (p.mouseX !== p.pmouseX || p.mouseY !== p.pmouseY) {
+                    if (p.random() < 0.005 && constellations.length < 3) {
+                        constellations.push(new Constellation(p.mouseX, p.mouseY));
+                    }
+                }
+            };
+
+            p.mousePressed = function() {
+                // Create ripple effect on click
+                ripples.push(new Ripple(p.mouseX, p.mouseY));
+                playInteractionSound(0.5);
+            };
+
+            p.mouseDragged = function() {
+                // Create shooting star following mouse when dragged
+                if (p.random() < 0.1 && shootingStars.length < maxShootingStars) {
+                    shootingStars.push(new ShootingStar(p.mouseX, p.mouseY, true));
+                }
+            };
+
+            p.windowResized = function() {
+                p.resizeCanvas(p.windowWidth, p.windowHeight);
+                createBackgroundGradient();
+            };
+
+            function playInteractionSound(intensity) {
+                if (!isAudioEnabled) return;
+                
+                if (!oscillator) {
+                    oscillator = audioContext.createOscillator();
+                    oscillator.type = 'sine';
+                    oscillator.connect(gainNode);
+                    oscillator.start();
+                }
+                
+                oscillator.frequency.setValueAtTime(300 + intensity * 800, audioContext.currentTime);
+                gainNode.gain.cancelScheduledValues(audioContext.currentTime);
+                gainNode.gain.setValueAtTime(0.1 * intensity, audioContext.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.5);
+            }
+
+            class Star {
+                constructor() {
+                    this.reset();
+                    this.z = p.random(0.1, 1);
+                    this.size = p.map(this.z, 0.1, 1, 1, 3);
+                    this.blinkSpeed = p.random(0.01, 0.05);
+                    this.blinkOffset = p.random(p.TWO_PI);
+                }
+                
+                reset() {
+                    this.x = p.random(p.width);
+                    this.y = p.random(p.height);
+                    this.brightness = p.random(100, 255);
+                }
+                
+                update() {
+                    // Twinkle effect
+                    this.brightness = 150 + p.sin(p.frameCount * this.blinkSpeed + this.blinkOffset) * 100;
+                }
+                
+                display() {
+                    let alpha = p.map(this.z, 0.1, 1, 100, 255);
+                    let col = p.color(255, 255, 255, alpha);
+                    col.setAlpha(p.map(this.brightness, 50, 255, 50, alpha));
+                    p.fill(col);
+                    p.noStroke();
+                    p.ellipse(this.x, this.y, this.size, this.size);
+                }
+            }
+
+            class ShootingStar {
+                constructor(x, y, followMouse = false) {
+                    this.followMouse = followMouse;
+                    this.reset(x, y);
+                    playInteractionSound(0.8);
+                }
+                
+                reset(x, y) {
+                    if (this.followMouse) {
+                        this.x = x || p.mouseX;
+                        this.y = y || p.mouseY;
+                        this.speedX = (p.mouseX - p.pmouseX) * 0.5;
+                        this.speedY = (p.mouseY - p.pmouseY) * 0.5;
+                    } else {
+                        this.x = p.random(-100, p.width + 100);
+                        this.y = p.random(-100, p.height/2);
+                        let angle = p.random(p.PI/6, p.PI/3);
+                        this.speedX = p.cos(angle) * 10;
+                        this.speedY = p.sin(angle) * 10;
+                    }
+                    
+                    this.size = p.random(2, 4);
+                    this.life = 100;
+                    this.maxLife = 100;
+                    this.trail = [];
+                    this.maxTrailLength = 20;
+                    this.color = p.color(currentPalette[4]);
+                }
+                
+                update() {
+                    this.x += this.speedX;
+                    this.y += this.speedY;
+                    this.life--;
+                    
+                    // Add current position to trail
+                    this.trail.push({x: this.x, y: this.y});
+                    if (this.trail.length > this.maxTrailLength) {
+                        this.trail.shift();
+                    }
+                    
+                    // Change direction slightly to follow mouse if enabled
+                    if (this.followMouse) {
+                        let dx = p.mouseX - this.x;
+                        let dy = p.mouseY - this.y;
+                        let dist = p.sqrt(dx*dx + dy*dy);
+                        if (dist > 0) {
+                            this.speedX += dx/dist * 0.2;
+                            this.speedY += dy/dist * 0.2;
+                        }
+                    }
+                }
+                
+                display() {
+                    // Draw trail
+                    for (let i = 0; i < this.trail.length; i++) {
+                        let alpha = p.map(i, 0, this.trail.length, 50, 200);
+                        let size = p.map(i, 0, this.trail.length, this.size*0.5, this.size);
+                        let pos = this.trail[i];
+                        
+                        this.color.setAlpha(alpha);
+                        p.fill(this.color);
+                        p.noStroke();
+                        p.ellipse(pos.x, pos.y, size, size);
+                    }
+                    
+                    // Draw head
+                    p.fill(255, 255, 255, 255);
+                    p.ellipse(this.x, this.y, this.size, this.size);
+                }
+                
+                isDone() {
+                    return this.life <= 0 || 
+                           this.x < -100 || this.x > p.width + 100 || 
+                           this.y < -100 || this.y > p.height + 100;
+                }
+            }
+
+            class Ripple {
+                constructor(x, y) {
+                    this.x = x;
+                    this.y = y;
+                    this.radius = 5;
+                    this.maxRadius = p.random(100, 200);
+                    this.speed = p.random(2, 4);
+                    this.life = 255;
+                    this.decay = p.random(2, 4);
+                    this.color = p.color(currentPalette[3]);
+                }
+                
+                update() {
+                    this.radius += this.speed;
+                    this.life -= this.decay;
+                }
+                
+                display() {
+                    this.color.setAlpha(this.life);
+                    p.noFill();
+                    p.stroke(this.color);
+                    p.strokeWeight(2);
+                    p.ellipse(this.x, this.y, this.radius * 2, this.radius * 2);
+                    
+                    // Create constellation in ripple if large enough
+                    if (this.radius > this.maxRadius * 0.7 && p.random() < 0.1 && constellations.length < 5) {
+                        constellations.push(new Constellation(this.x, this.y, this.radius));
+                    }
+                }
+                
+                isDone() {
+                    return this.radius > this.maxRadius || this.life <= 0;
+                }
+            }
+
+            class Constellation {
+                constructor(x, y, size = 100) {
+                    this.x = x;
+                    this.y = y;
+                    this.size = size;
+                    this.points = [];
+                    this.lines = [];
+                    this.life = 255;
+                    this.decay = 0.5;
+                    this.color = p.color(currentPalette[2]);
+                    
+                    // Create constellation points
+                    let pointCount = p.floor(p.random(3, 7));
+                    for (let i = 0; i < pointCount; i++) {
+                        let angle = p.random(p.TWO_PI);
+                        let distance = p.random(size * 0.2, size * 0.8);
+                        this.points.push({
+                            x: this.x + p.cos(angle) * distance,
+                            y: this.y + p.sin(angle) * distance,
+                            size: p.random(3, 6)
+                        });
+                    }
+                    
+                    // Create lines connecting some points
+                    for (let i = 0; i < pointCount - 1; i++) {
+                        if (p.random() < 0.7) { // 70% chance to connect to next point
+                            this.lines.push({
+                                x1: this.points[i].x,
+                                y1: this.points[i].y,
+                                x2: this.points[i+1].x,
+                                y2: this.points[i+1].y
+                            });
+                        }
+                    }
+                }
+                
+                update() {
+                    this.life -= this.decay;
+                }
+                
+                display() {
+                    this.color.setAlpha(this.life);
+                    
+                    // Draw connecting lines
+                    p.stroke(this.color);
+                    p.strokeWeight(1);
+                    for (let line of this.lines) {
+                        p.line(line.x1, line.y1, line.x2, line.y2);
+                    }
+                    
+                    // Draw points
+                    p.noStroke();
+                    for (let point of this.points) {
+                        let alpha = p.map(this.life, 0, 255, 50, 200);
+                        p.fill(255, 255, 255, alpha);
+                        p.ellipse(point.x, point.y, point.size, point.size);
+                    }
+                }
+                
+                isDone() {
+                    return this.life <= 0;
+                }
+            }
+        };
+
+        new p5(sketch);
+    </script>
+
+              
+          
+                
+          
+              
+</body></html>
